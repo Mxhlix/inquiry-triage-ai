@@ -1,0 +1,15 @@
+{
+  "name": "inquiry-triage-ai",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Classify inquiry emails (inquiry / sales / spam) and draft replies from an FAQ with Gemini, as a Google Apps Script component",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test test/triage.test.js",
+    "live": "node harness/run.js",
+    "serve": "node harness/server.js"
+  }
+}

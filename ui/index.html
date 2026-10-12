@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>問い合わせの振り分け</title>
+<style>
+  :root { --bg:#f5f6f4; --panel:#fff; --line:#dfe3dc; --ink:#1f2a22; --sub:#5d6b61; --accent:#2f7a4a;
+          --l1:#2f7a4a; --l1bg:#e5f3ea; --l2:#9a6a00; --l2bg:#fbf1d9; --l3:#b3261e; --l3bg:#fbe4e1; --nf:#4a5a8c; --nfbg:#e6eaf6;
+          --sl:#6b4f8a; --slbg:#efe8f6; --sp:#5d5d5d; --spbg:#e4e4e4; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:"Noto Sans JP","Yu Gothic UI","Meiryo",sans-serif; font-size:14px; }
+  header { display:flex; align-items:center; gap:16px; padding:12px 20px; background:var(--panel); border-bottom:1px solid var(--line); }
+  header h1 { font-size:17px; margin:0; }
+  header .count { color:var(--sub); font-size:13px; }
+  header button { margin-left:auto; }
+  button { font:inherit; font-size:14px; padding:8px 16px; border-radius:6px; border:1px solid var(--accent); background:var(--accent); color:#fff; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:default; }
+  main { display:grid; grid-template-columns:360px 1fr; gap:14px; padding:14px 20px; height:calc(100vh - 57px); }
+  .list { background:var(--panel); border:1px solid var(--line); border-radius:8px; overflow:auto; }
+  .mail { padding:8px 14px; border-bottom:1px solid var(--line); cursor:pointer; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:4px 8px; align-items:baseline; }
+  .mail:hover { background:#f0f4ef; }
+  .mail.sel { background:#e8f0e9; box-shadow:inset 3px 0 0 var(--accent); }
+  .mail .subj { font-weight:600; font-size:13.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .mail .at { color:var(--sub); font-size:12px; text-align:right; }
+  .mail .from { color:var(--sub); font-size:12.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .mail .tag { font-size:12px; min-height:18px; white-space:nowrap; text-align:right; }
+  .badge { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; font-weight:600; }
+  .b1 { background:var(--l1bg); color:var(--l1); } .b2 { background:var(--l2bg); color:var(--l2); }
+  .b3 { background:var(--l3bg); color:var(--l3); } .bn { background:var(--nfbg); color:var(--nf); }
+  .bw { background:#eceeea; color:var(--sub); }
+  .bs { background:var(--slbg); color:var(--sl); } .bx { background:var(--spbg); color:var(--sp); }
+  .detail { display:grid; grid-template-rows:auto 1fr; gap:12px; min-height:0; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:14px 18px; }
+  .card h2 { font-size:15px; margin:0 0 6px; }
+  .meta { color:var(--sub); font-size:12.5px; margin-bottom:8px; }
+  .body { white-space:pre-wrap; line-height:1.7; }
+  .result { overflow:auto; }
+  .row { display:flex; align-items:baseline; gap:10px; margin-bottom:8px; flex-wrap:wrap; }
+  .row .k { color:var(--sub); font-size:12.5px; width:100px; flex:none; }
+  .lv { font-size:14px; padding:3px 12px; }
+  .faq { display:inline-block; border:1px solid var(--line); border-radius:6px; padding:2px 8px; margin:0 6px 4px 0; font-size:13px; background:#fafbf9; }
+  .reply { white-space:pre-wrap; line-height:1.75; border:1px solid var(--line); border-radius:6px; padding:10px 14px; background:#fbfcfa; }
+  .notice { border-radius:6px; padding:10px 14px; font-weight:600; line-height:1.6; }
+  .n3 { background:var(--l3bg); color:var(--l3); } .ns { background:var(--slbg); color:var(--sl); } .nx { background:var(--spbg); color:var(--sp); } .nn { background:var(--nfbg); color:var(--nf); } .ne { background:#eceeea; color:var(--sub); }
+  .empty { color:var(--sub); }
+  .spin { color:var(--sub); }
+</style>
+</head>
+<body>
+<header>
+  <h1>問い合わせの振り分け</h1>
+  <span class="count" id="count"></span>
+  <button id="all">まとめて振り分ける</button>
+</header>
+<main>
+  <div class="list" id="list"></div>
+  <div class="detail">
+    <div class="card" id="mail"><span class="empty">左の一覧から問い合わせを選んでください。</span></div>
+    <div class="card result" id="result"></div>
+  </div>
+</main>
+<script>
+const KIND = { sales: ['bs', '営業', '営業のメール', 'ns', '営業のメールです。お客様の問い合わせではないため、返信案は作っていません。'],
+  spam: ['bx', '迷惑メール', '迷惑メールの疑い', 'nx', '迷惑メールの疑いがあります。本文のリンクを開かず、返信しないでください。'] };
+const LV = { 1: ['b1', 'レベル1 一般的な問い合わせ'], 2: ['b2', 'レベル2 確認が必要'], 3: ['b3', 'レベル3 担当者へ回す'] };
+let mails = [], results = {}, sel = null, busy = new Set();
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function tagOf(id) {
+  if (busy.has(id)) return '<span class="badge bw">振り分け中…</span>';
+  const r = results[id];
+  if (!r) return '<span class="badge bw">未処理</span>';
+  if (r.status === 'ai_error') return '<span class="badge bw">AIの応答なし</span>';
+  if (KIND[r.status]) return `<span class="badge ${KIND[r.status][0]}">${KIND[r.status][1]}</span> 返信しない`;
+  const lv = `<span class="badge ${LV[r.level][0]}">レベル${r.level}</span>`;
+  const st = r.status === 'draft' ? ' 返信案あり' : r.status === 'escalate' ? ' 担当者へ' : ' <span class="badge bn">FAQに答えなし</span>';
+  return lv + st;
+}
+
+function renderList() {
+  $('list').innerHTML = mails.map((m) => `
+    <div class="mail ${sel === m.id ? 'sel' : ''}" data-id="${m.id}">
+      <span class="subj">${esc(m.subject)}</span><span class="at">${esc(m.received)}</span>
+      <span class="from">${esc(m.name)}</span><span class="tag">${tagOf(m.id)}</span>
+    </div>`).join('');
+  const done = Object.keys(results).length;
+  $('count').textContent = `受信 ${mails.length}件 ／ 振り分け済み ${done}件`;
+}
+
+function renderDetail() {
+  const m = mails.find((x) => x.id === sel);
+  if (!m) return;
+  $('mail').innerHTML = `<h2>${esc(m.subject)}</h2>
+    <div class="meta">${esc(m.name)} &lt;${esc(m.from)}&gt; ／ ${esc(m.received)}</div>
+    <div class="body">${esc(m.body)}</div>`;
+  const r = results[m.id];
+  if (busy.has(m.id)) { $('result').innerHTML = '<span class="spin">AIが振り分けています…</span>'; return; }
+  if (!r) { $('result').innerHTML = `<span class="empty">まだ振り分けていません。</span> <button id="one">この問い合わせを振り分ける</button>`; $('one').onclick = () => triage(m.id); return; }
+  if (r.status === 'ai_error') { $('result').innerHTML = `<div class="notice ne">AIが応答しませんでした。担当者が対応してください。<br>${esc(r.reason)}</div>`; return; }
+  if (KIND[r.status]) {
+    const k = KIND[r.status];
+    $('result').innerHTML = `<div class="row"><span class="k">種類</span><span class="badge lv ${k[0]}">${k[2]}</span></div>
+      <div class="row"><span class="k">理由</span><span>${esc(r.reason)}</span></div>
+      <div class="notice ${k[3]}">${k[4]}</div>`;
+    return;
+  }
+  let h = `<div class="row"><span class="k">レベル</span><span class="badge lv ${LV[r.level][0]}">${LV[r.level][1]}</span><span class="badge bw">${esc(r.category)}</span></div>
+    <div class="row"><span class="k">理由</span><span>${esc(r.reason)}</span></div>`;
+  if (r.raisedBy && r.raisedBy.length) h += `<div class="row"><span class="k"></span><span>「${esc(r.raisedBy.join('」「'))}」があるため、レベル3に上げました。</span></div>`;
+  if (r.status === 'draft') {
+    h += `<div class="row"><span class="k">使ったFAQ</span><span>${r.usedFaq.map((f) => `<span class="faq">${esc(f.id)} ${esc(f.title)}</span>`).join('')}</span></div>
+      <div class="row"><span class="k">返信案</span></div><div class="reply">${esc(r.reply)}</div>`;
+  } else if (r.status === 'escalate') {
+    h += `<div class="notice n3">担当者へ回してください。返信案は作っていません。</div>`;
+    if (r.candidates.length) h += `<div class="row" style="margin-top:10px"><span class="k">関係しそうなFAQ</span><span>${r.candidates.map((f) => `<span class="faq">${esc(f.id)} ${esc(f.title)}</span>`).join('')}</span></div>`;
+  } else {
+    h += `<div class="notice nn">FAQに答えがありません。返信案は作っていません。担当者が回答してください。</div>`;
+  }
+  $('result').innerHTML = h;
+}
+
+async function triage(id) {
+  busy.add(id); renderList(); renderDetail();
+  try {
+    const r = await (await fetch('/api/triage?id=' + id, { method: 'POST' })).json();
+    results[id] = r;
+  } finally { busy.delete(id); }
+  renderList(); renderDetail();
+}
+
+$('list').onclick = (e) => { const el = e.target.closest('.mail'); if (!el) return; sel = el.dataset.id; renderList(); renderDetail(); };
+$('all').onclick = async () => {
+  $('all').disabled = true;
+  for (const m of mails) if (!results[m.id]) await triage(m.id);
+  $('all').disabled = false;
+};
+
+(async () => { mails = await (await fetch('/api/mails')).json(); renderList(); })();
+</script>
+</body>
+</html>
